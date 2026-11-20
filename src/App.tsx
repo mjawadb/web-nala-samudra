@@ -161,6 +161,7 @@ function App() {
   const [placedCargo, setPlacedCargo] = useState<number | null>(null)
   const [totalCargo, setTotalCargo] = useState<number | null>(null)
   const [collisions, setCollisions] = useState<number | null>(null)
+  const [killSwitch, setKillSwitch] = useState('UNKNOWN')
   const [simBusy, setSimBusy] = useState<'idle' | 'starting' | 'resetting'>('idle')
   const [simToast, setSimToast] = useState<string | null>(null)
 
@@ -251,6 +252,7 @@ function App() {
       missionTopic.subscribe((message: { data: string }) => {
         const state = message.data.toUpperCase()
         setMissionStatus(state)
+        setKillSwitch(state === 'ESTOP' ? 'ACTIVE' : 'INACTIVE')
       })
 
       const batteryTopic = new ROSLIB.Topic({
@@ -312,6 +314,7 @@ function App() {
             start: 'Mission started',
             stop: 'Mission stopped',
             reset: 'Mission reset',
+            estop: 'Emergency stop activated',
             pick: 'Cargo picked up',
             place: 'Cargo delivered',
             gate_pass: 'Gate cleared',
@@ -470,6 +473,55 @@ function App() {
     }
   }, [wsUrl])
 
+  const handleKillSwitch = () => {
+    const ros = rosRef.current
+    if (!connected || !ros) {
+      alert('ROS 2 belum terhubung!')
+      return
+    }
+    const confirmed = window.confirm(
+      'Aktifkan EMERGENCY STOP? Kapal pada simulasi akan dihentikan.'
+    )
+    if (!confirmed) return
+
+    const estopService = new ROSLIB.Service({
+      ros,
+      name: '/estop',
+      serviceType: 'std_srvs/srv/Trigger',
+    })
+    estopService.callService(
+      {},
+      (response: { success: boolean; message: string }) => {
+        if (response.success) {
+          setKillSwitch('ACTIVE')
+          setMissionStatus('ESTOP')
+          alert(response.message)
+        } else {
+          alert('E-STOP gagal: ' + response.message)
+        }
+      }
+    )
+  }
+
+  const handleResetEstop = () => {
+    const ros = rosRef.current
+    if (!connected || !ros) return
+    const resetService = new ROSLIB.Service({
+      ros,
+      name: '/mission/reset',
+      serviceType: 'std_srvs/srv/Trigger',
+    })
+    resetService.callService(
+      {},
+      (response: { success: boolean; message: string }) => {
+        if (response.success) {
+          setKillSwitch('INACTIVE')
+          alert(response.message)
+        }
+      }
+    )
+  }
+
   const handleStartSimulation = () => {
     const ros = rosRef.current
     if (!connected || !ros) {
@@ -510,6 +562,7 @@ function App() {
     srv.callService({}, (response: { success: boolean; message: string }) => {
       setSimBusy('idle')
       if (response.success) {
+        setKillSwitch('INACTIVE')
         setMissionStatus('IDLE')
         setRoutePoints([])
         setPlannedPoints([])
@@ -526,6 +579,7 @@ function App() {
     FTP_KE_SPOT2: 'Vessel is navigating FTP gates toward Spot 2',
     RUNNING: 'Mission task (Cargo Pick / Unload & Spray) is currently running',
     DONE: 'Mission completed — all cargo delivered & Spot 2 docked',
+    ESTOP: 'Emergency stop is active — thrusters cut off',
   }
 
   const status = missionStatus.toUpperCase()
@@ -694,7 +748,7 @@ function App() {
               </button>
             </div>
             <div className="status-list">
-              {['IDLE', 'RUNNING', 'TRANSIT', 'DONE'].map((item) => (
+              {['IDLE', 'RUNNING', 'TRANSIT', 'DONE', 'ESTOP'].map((item) => (
                 <span
                   key={item}
                   className={`status ${status === item ? 'idle' : ''}`}
@@ -1091,6 +1145,60 @@ function App() {
                   ? 'Total arena collisions'
                   : 'Waiting for collision data'}
               </span>
+            </article>
+
+            <article className="stat-card">
+              <span className="stat-icon">◉</span>
+              <p>Kill Switch Status</p>
+              <h2 className="warning-text">{killSwitch}</h2>
+              <span className="stat-note">
+                {killSwitch === 'ACTIVE'
+                  ? 'Emergency stop activated in simulation'
+                  : 'No emergency stop signal detected'}
+              </span>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handleKillSwitch}
+                  disabled={!connected || killSwitch === 'ACTIVE'}
+                  style={{
+                    padding: '9px 14px',
+                    background: '#c0392b',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor:
+                      connected && killSwitch !== 'ACTIVE'
+                        ? 'pointer'
+                        : 'not-allowed',
+                    opacity: connected && killSwitch !== 'ACTIVE' ? 1 : 0.55,
+                  }}
+                >
+                  ACTIVATE E-STOP
+                </button>
+                {killSwitch === 'ACTIVE' && (
+                  <button
+                    type="button"
+                    onClick={handleResetEstop}
+                    disabled={!connected}
+                    style={{
+                      padding: '9px 14px',
+                      background: '#0e7490',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '5px',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    RESET E-STOP
+                  </button>
+                )}
+              </div>
             </article>
           </div>
         </section>
